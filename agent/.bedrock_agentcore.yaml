@@ -32,7 +32,7 @@ agents:
     bedrock_agentcore:
       agent_id: robot_vacuum_agent-Z5XPW5DDJs
       agent_arn: arn:aws:bedrock-agentcore:us-east-1:832211724792:runtime/robot_vacuum_agent-Z5XPW5DDJs
-      agent_session_id: b6ef4f47-e4f4-4198-876e-fa5620ff7c59
+      agent_session_id: 1e811f3d-53ef-4839-bc1b-8b74793cafa0
     codebuild:
       project_name: null
       execution_role: null

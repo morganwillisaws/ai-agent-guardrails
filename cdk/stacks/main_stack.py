@@ -20,6 +20,7 @@ from aws_cdk import (
     aws_wafv2 as wafv2,
     custom_resources as cr,
 )
+import aws_cdk as cdk
 from constructs import Construct
 import json, os
 
@@ -408,14 +409,53 @@ class ProductionAgentGuardrailsStack(Stack):
             resources=["*"],
             conditions={"StringEquals": {"cloudwatch:namespace": "bedrock-agentcore"}}))
 
-        # Read the create_zip script for Docker bundling
+        # Read the create_zip script for bundling
         _scripts = os.path.join(os.path.dirname(__file__), "..", "scripts")
+        _agent_dir = os.path.join(_repo, "agent")
+
+        # Local bundling: pip install + zip without Docker
+        import jsii
+        @jsii.implements(cdk.ILocalBundling)
+        class LocalBundler:
+            def try_bundle(self, output_dir, *, image=None, **kwargs):
+                import subprocess, shutil, zipfile
+                bundle_dir = os.path.join(output_dir, "_bundle")
+                os.makedirs(bundle_dir, exist_ok=True)
+                for item in os.listdir(_agent_dir):
+                    if item in ("__pycache__", ".env", ".bedrock_agentcore"):
+                        continue
+                    src = os.path.join(_agent_dir, item)
+                    dst = os.path.join(bundle_dir, item)
+                    if os.path.isdir(src):
+                        shutil.copytree(src, dst, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(src, dst)
+                subprocess.check_call([
+                    "pip", "install", "--target", bundle_dir, "--upgrade",
+                    "--platform", "manylinux2014_aarch64",
+                    "--only-binary=:all:",
+                    "--python-version", "311",
+                    "--implementation", "cp",
+                    "-r", os.path.join(bundle_dir, "requirements.txt"),
+                ])
+                zip_path = os.path.join(output_dir, "agent-code.zip")
+                ignore = {"__pycache__", ".git", ".venv", ".bedrock_agentcore"}
+                with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                    for root, dirs, files in os.walk(bundle_dir):
+                        dirs[:] = [d for d in dirs if d not in ignore]
+                        for f in files:
+                            fp = os.path.join(root, f)
+                            zf.write(fp, os.path.relpath(fp, bundle_dir))
+                shutil.rmtree(bundle_dir)
+                return True
+
         with open(os.path.join(_scripts, "create_zip.py"), "r") as f:
             create_zip_script = f.read()
 
         agent_code = s3_assets.Asset(self, "AgentCode",
-            path=os.path.join(_repo, "agent"),
+            path=_agent_dir,
             bundling=BundlingOptions(
+                local=LocalBundler(),
                 image=DockerImage.from_registry("python:3.11-slim"),
                 platform="linux/arm64",
                 command=["bash", "-c", f"""
