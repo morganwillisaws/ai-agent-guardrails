@@ -99,14 +99,32 @@ Everything is managed by `cdk deploy` — a single command deploys the full stac
 
 ## Deploy
 
+### Option 1: CDK + Docker (recommended for production)
+
 ```bash
-# Ensure Docker is running
+# Requires Docker running — bundles agent code with ARM64 dependencies in a container
 cd cdk
 pip install -r requirements.txt
 cdk deploy
 ```
 
-That's it. No separate `agentcore deploy` needed — CDK bundles the agent code with all dependencies using Docker and deploys it directly to the AgentCore Runtime.
+### Option 2: CDK + agentcore deploy (if Docker is unavailable)
+
+CDK deploys all infrastructure. Agent code is deployed separately using the AgentCore CLI, which handles dependency bundling internally.
+
+```bash
+# Step 1: Deploy infrastructure
+cd cdk
+pip install -r requirements.txt
+cdk deploy
+
+# Step 2: Deploy agent code (after CDK completes)
+cd ../agent
+pip install -r requirements.txt
+agentcore deploy --auto-update-on-conflict
+```
+
+Note: with Option 2, every `cdk deploy` will overwrite the runtime with a non-bundled asset, breaking the agent. You must re-run `agentcore deploy --auto-update-on-conflict` after each `cdk deploy`.
 
 ## Post-Deploy Setup
 
@@ -185,3 +203,46 @@ All roles follow least-privilege:
 - Gateway role: only `lambda:InvokeFunction` on the specific tool Lambdas
 - Policy attach CR: only `GetGateway` + `UpdateGateway` on gateways, plus `iam:PassRole` on the gateway role
 - Interceptor: no extra permissions (just reads the JWT from the request)
+
+## Troubleshooting
+
+### Agent returns errors / no logs in CloudWatch
+
+The AgentCore Runtime has a 30-second init timeout. If the agent code isn't properly bundled with dependencies, it fails silently. Fix: redeploy agent code with `agentcore deploy --auto-update-on-conflict` from the `agent/` directory.
+
+### "Authorization method mismatch" on invoke
+
+This means `cdk deploy` overwrote the runtime with a non-bundled asset. The runtime lost its OAuth config. Fix: run `agentcore deploy --auto-update-on-conflict` to restore it.
+
+### Docker auth required / Docker not running
+
+The CDK Docker bundling requires Docker Desktop with a valid license. If unavailable, use Option 2 (CDK + agentcore deploy). The `agentcore` CLI handles bundling internally without Docker.
+
+### Cedar policy CREATE_FAILED "Overly Restrictive"
+
+The forbid policy must be created after the corresponding permit policy. The CDK stack has explicit `add_dependency` to enforce ordering. If deploying from scratch and this fails, delete the failed policies and redeploy.
+
+### Gateway returns 403 on tool calls
+
+Check the Cedar policies are all ACTIVE:
+```bash
+aws bedrock-agentcore-control list-policies \
+  --policy-engine-id <policy-engine-id> \
+  --query 'policies[].{name:name,status:status}' --output table
+```
+
+### Memory poisoning (guardrail-blocked messages replay)
+
+If a previous guardrail block gets stored in memory, it can poison subsequent turns in the same session. Fix: use a new session ID for each test. In production, implement selective memory writes to avoid persisting blocked responses.
+
+### "Loaded 1 tools" instead of 6
+
+The Cedar policy engine filters `tools/list` based on permits. If the broad `permit_all_other_tools` policy isn't ACTIVE, only tools with explicit permits (like return-label-generator) will be visible. Verify all 7 policies are ACTIVE.
+
+### Fresh account deployment
+
+1. `cdk bootstrap` (one-time)
+2. `cdk deploy`
+3. Run post-deploy setup (create demo users, seed DynamoDB)
+4. Enable CloudWatch Transaction Search (one-time, for observability)
+5. If using Option 2: `cd agent && agentcore deploy --auto-update-on-conflict`
