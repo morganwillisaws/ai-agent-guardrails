@@ -2,7 +2,6 @@ import base64
 import json
 import logging
 import os
-
 import boto3
 from bedrock_agentcore.runtime import BedrockAgentCoreApp, RequestContext
 from bedrock_agentcore.memory.integrations.strands.config import AgentCoreMemoryConfig

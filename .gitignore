@@ -43,3 +43,4 @@ cdk/lambdas/gateway_custom_resource/six.py
 cdk/lambdas/gateway_custom_resource/bin/
 tool-lambdas/return-label-generator/fpdf/
 tool-lambdas/issue-refund/fpdf/
+agent/.bedrock_agentcore.yaml

@@ -66,7 +66,7 @@ Customer → Cognito (OAuth) → API Gateway (REST) → AgentCore Runtime (CUSTO
 
 Everything is managed by `cdk deploy` — a single command deploys the full stack:
 
-- Cognito User Pool + App Client (OAuth authorization code flow)
+- Cognito User Pool + App Client (OAuth)
 - REST API Gateway with Cognito authorizer + CORS
 - WAF (rate limiting + AWS managed rules)
 - AgentCore Runtime with Docker-bundled agent code (dependencies installed at deploy time)
@@ -136,17 +136,17 @@ POOL_ID=$(aws cloudformation describe-stacks --stack-name ProductionAgentGuardra
 
 aws cognito-idp admin-create-user --user-pool-id $POOL_ID --username john.smith \
   --user-attributes Name=email,Value=john.smith@example.com Name=custom:customer_id,Value=12345 \
-  --temporary-password TempPass123! --message-action SUPPRESS
+  --temporary-password <PASSWORDHERE> --message-action SUPPRESS
 
 aws cognito-idp admin-set-user-password --user-pool-id $POOL_ID --username john.smith \
-  --password DemoPass123! --permanent
+  --password <PASSWORDHERE>  --permanent
 
 aws cognito-idp admin-create-user --user-pool-id $POOL_ID --username sarah.johnson \
   --user-attributes Name=email,Value=sarah.johnson@example.com Name=custom:customer_id,Value=67890 \
-  --temporary-password TempPass123! --message-action SUPPRESS
+  --temporary-password <PASSWORDHERE>  --message-action SUPPRESS
 
 aws cognito-idp admin-set-user-password --user-pool-id $POOL_ID --username sarah.johnson \
-  --password DemoPass123! --permanent
+  --password <PASSWORDHERE>  --permanent
 ```
 
 ### Seed sample orders
@@ -182,37 +182,11 @@ python server.py
 # Open http://localhost:8080
 ```
 
-## Key Design Decisions
-
-- OAuth (CUSTOM_JWT) all the way through — no IAM auth at the gateway
-- No BFF Lambda — API Gateway proxies directly to AgentCore Runtime via HTTP_PROXY
-- Single `cdk deploy` — agent code bundled via Docker with ARM64 dependencies
-- No direct refund tool — returns generate a shipping label, refund is automatic on receipt
-- Cedar policy blocks return labels for orders over $500 (escalated to human review)
-- Customer identity flows from JWT through the interceptor — the agent never controls it
-- Tools are narrow and deterministic — the tool defines the boundary, not the model
-- All IAM permissions scoped to specific resources (no `*` wildcards except where required)
-- Observability auto-instrumented via `aws-opentelemetry-distro` + Strands OTEL integration
-
-## IAM Permissions
-
-All roles follow least-privilege:
-
-- Runtime role: scoped to specific Bedrock models, guardrails, SSM parameter namespace (`/robot-vacuum/*`), agentcore memory/gateway resources, and X-Ray
-- Tool Lambdas: each gets only the DynamoDB/S3 access it needs (via CDK `grant_*` methods)
-- Gateway role: only `lambda:InvokeFunction` on the specific tool Lambdas
-- Policy attach CR: only `GetGateway` + `UpdateGateway` on gateways, plus `iam:PassRole` on the gateway role
-- Interceptor: no extra permissions (just reads the JWT from the request)
-
 ## Troubleshooting
 
 ### Agent returns errors / no logs in CloudWatch
 
 The AgentCore Runtime has a 30-second init timeout. If the agent code isn't properly bundled with dependencies, it fails silently. Fix: redeploy agent code with `agentcore deploy --auto-update-on-conflict` from the `agent/` directory.
-
-### "Authorization method mismatch" on invoke
-
-This means `cdk deploy` overwrote the runtime with a non-bundled asset. The runtime lost its OAuth config. Fix: run `agentcore deploy --auto-update-on-conflict` to restore it.
 
 ### Docker auth required / Docker not running
 
@@ -234,10 +208,6 @@ aws bedrock-agentcore-control list-policies \
 ### Memory poisoning (guardrail-blocked messages replay)
 
 If a previous guardrail block gets stored in memory, it can poison subsequent turns in the same session. Fix: use a new session ID for each test. In production, implement selective memory writes to avoid persisting blocked responses.
-
-### "Loaded 1 tools" instead of 6
-
-The Cedar policy engine filters `tools/list` based on permits. If the broad `permit_all_other_tools` policy isn't ACTIVE, only tools with explicit permits (like return-label-generator) will be visible. Verify all 7 policies are ACTIVE.
 
 ### Fresh account deployment
 

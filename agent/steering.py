@@ -1,13 +1,3 @@
-"""
-Customer Service Steering Handler.
-
-Evaluates agent responses before they reach the customer.
-Catches policy violations that other safety layers can't:
-- Promises not backed by tool results
-- Internal system details leaking into responses
-- Over-promising on escalations
-- Hallucinated contact information
-"""
 import logging
 import os
 from typing import Any

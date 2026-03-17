@@ -1,16 +1,3 @@
-"""
-Gateway Interceptor Lambda — Trusted Identity Injection.
-
-Runs on every request flowing through the AgentCore Gateway.
-Extracts customer_id from the JWT and injects it as _authenticated_customer_id
-into every tool call's arguments. Each tool Lambda then verifies ownership
-against this trusted identity.
-
-The agent never controls customer identity — it flows from the JWT only.
-
-Response format follows the AgentCore Gateway interceptor contract:
-https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-interceptors-types.html
-"""
 import json
 import logging
 
